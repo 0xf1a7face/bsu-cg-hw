@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Лаб. 2 — Обработка изображений</title>
+  <style>
+    :root {
+      --bg: #17181c;
+      --fg: #ececf0;
+      --card: #23252b;
+      --ac: #8fa4ff;
+      --bd: #3a3d46;
+      color-scheme: dark;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    body {
+      margin: auto;
+      padding: 16px;
+      max-width: 1100px;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 12px;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin: 0 0 6px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--bd);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button,
+    select,
+    input[type=file] {
+      font: inherit;
+      color: var(--fg);
+      background: var(--bg);
+      border: 1px solid var(--bd);
+      border-radius: 6px;
+      padding: 6px 10px;
+    }
+
+    button.on {
+      background: var(--ac);
+      color: var(--bg);
+      border-color: var(--ac);
+    }
+
+    /* Сетка вкладки «Гистограммы и контраст» */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+
+    /* Сетка вкладки «Нелинейные фильтры» */
+    .fgrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+    }
+
+    /* Результат и разность — друг под другом */
+    .two {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+
+    /* Карточки фильтров без фона и обводки */
+    .fgrid .card {
+      border: none;
+      background: none;
+      padding: 0;
+    }
+
+    .fgrid canvas {
+      border: none;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+      border: 1px solid var(--bd);
+      border-radius: 6px;
+      background: #000;
+    }
+
+    canvas.h {
+      image-rendering: auto;
+      background: var(--bg);
+    }
+
+    small {
+      opacity: .8;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Лаб. 2. Фильтры по порядковым статистикам и контрастирование</h1>
+
+  <!-- Тестовая база и загрузка файла -->
+  <div class="card">
+    <h3>Тестовая база и загрузка</h3>
+    <div class="row" id="tests"></div>
+    <div class="row" style="margin-top: 8px">
+      <span>Своё изображение:</span>
+      <input type="file" id="file" accept="image/*">
+    </div>
+  </div>
+
+  <!-- Переключатель вкладок -->
+  <div class="row" style="margin-bottom: 12px">
+    <button id="t1" class="on">Нелинейные фильтры</button>
+    <button id="t2">Гистограммы и контраст</button>
+  </div>
+
+  <!-- Вкладка 1: нелинейные фильтры -->
+  <div id="p1">
+    <div class="card">
+      <div class="row">
+        <label>Окно
+          <select id="fw">
+            <option>3</option>
+            <option>5</option>
+            <option>7</option>
+            <option>9</option>
+            <option>11</option>
+          </select>
+        </label>
+        <label>Параметр
+          <input type="range" id="fp" min="0" max="100" value="25">
+          <span id="fpv">25</span>%
+        </label>
+      </div>
+      <small>
+        Параметр: перцентиль для k-рангового фильтра. Обработка по каналам RGB.
+      </small>
+    </div>
+
+    <div class="fgrid" id="fgrid"></div>
+    <!-- <div class="card" id="fstat" style="margin-top: 12px"></div> -->
+  </div>
+
+  <!-- Вкладка 2: гистограммы и контраст -->
+  <div id="p2" hidden>
+    <div class="card">
+      <div class="row">
+        <label>Отсечение для линейного контрастирования
+          <input type="range" id="clip" min="0" max="10" step="0.5" value="1">
+          <span id="clipv">1</span>%
+        </label>
+      </div>
+      <small>
+        <!-- Линейное: s = 255·(r − lo)/(hi − lo) по каждому каналу. -->
+        <!-- Эквализация: s = 255·CDF(r). -->
+        <!-- HSV: выравнивается только V, H и S сохраняются. -->
+      </small>
+    </div>
+    <div class="grid" id="cgrid"></div>
+  </div>
+
+  <script>
+    const S = 256;                       // размер встроенных тестовых изображений
+    const $ = id => document.getElementById(id);
+
+    let src = null;                      // текущее исходное изображение (ImageData)
+    let ref = null;                      // эталон без искажений (если есть)
+    let seed = 1;                        // состояние генератора псевдослучайных чисел
+
+    // Детерминированный ГПСЧ, чтобы шум был воспроизводимым
+    function rnd() {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    }
+
+    // Ограничение значения диапазоном 0..255
+    function cl(v) {
+      return v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+
+    function makeCanvas(w, h) {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      return c;
+    }
+
+    function clone(d) {
+      return new ImageData(new Uint8ClampedArray(d.data), d.width, d.height);
+    }
+
+    function putImage(canvas, d) {
+      canvas.width = d.width;
+      canvas.height = d.height;
+      canvas.getContext('2d').putImageData(d, 0, 0);
+    }
+
+    // ---------- Тестовая база ----------
+
+    // Эталонная сцена: градиент, фигуры, полосы
+    function baseImage() {
+      const c = makeCanvas(S, S);
+      const g = c.getContext('2d');
+
+      const gr = g.createLinearGradient(0, 0, S, S);
+      gr.addColorStop(0, '#3a6ea5');
+      gr.addColorStop(1, '#f0d9a8');
+      g.fillStyle = gr;
+      g.fillRect(0, 0, S, S);
+
+      g.fillStyle = '#c0392b';
+      g.beginPath();
+      g.arc(80, 90, 48, 0, 7);
+      g.fill();
+
+      g.fillStyle = '#27ae60';
+      g.fillRect(140, 40, 80, 70);
+
+      g.fillStyle = '#f1c40f';
+      g.beginPath();
+      g.moveTo(60, 230);
+      g.lineTo(120, 140);
+      g.lineTo(180, 230);
+      g.fill();
+
+      g.fillStyle = '#222';
+      for (let i = 0; i < 8; i++) {
+        g.fillRect(190 + i * 8, 150, 4, 90);
+      }
+
+      g.strokeStyle = '#fff';
+      g.lineWidth = 2;
+      g.strokeRect(20, 150, 40, 40);
+
+      return g.getImageData(0, 0, S, S);
+    }
+
+    // Усредняющее размытие окном (2r+1)×(2r+1)
+    function boxBlur(d, r) {
+      const o = clone(d), w = d.width, h = d.height;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          for (let k = 0; k < 3; k++) {
+            let sum = 0, n = 0;
+            for (let j = -r; j <= r; j++) {
+              for (let i = -r; i <= r; i++) {
+                const xx = Math.min(w - 1, Math.max(0, x + i));
+                const yy = Math.min(h - 1, Math.max(0, y + j));
+                sum += d.data[(yy * w + xx) * 4 + k];
+                n++;
+              }
+            }
+            o.data[(y * w + x) * 4 + k] = sum / n;
+          }
+        }
+      }
+      return o;
+    }
+
+    // Искажения, получаемые из эталона
+    const variants = {
+      'Эталон': d => clone(d),
+
+      'Соль и перец': d => {
+        const o = clone(d);
+        for (let i = 0; i < o.data.length; i += 4) {
+          const r = rnd();
+          if (r < 0.05) {
+            o.data[i] = o.data[i + 1] = o.data[i + 2] = 0;
+          } else if (r > 0.95) {
+            o.data[i] = o.data[i + 1] = o.data[i + 2] = 255;
+          }
+        }
+        return o;
+      },
+
+      'Гауссов шум': d => {
+        const o = clone(d);
+        for (let i = 0; i < o.data.length; i++) {
+          if (i % 4 < 3) {
+            // преобразование Бокса — Мюллера, σ = 25
+            const n = Math.sqrt(-2 * Math.log(rnd() + 1e-9)) * Math.cos(6.283 * rnd()) * 25;
+            o.data[i] = cl(o.data[i] + n);
+          }
+        }
+        return o;
+      },
+
+      'Размытие': d => boxBlur(d, 3),
+
+      'Малоконтрастное': d => {
+        const o = clone(d);
+        for (let i = 0; i < o.data.length; i++) {
+          if (i % 4 < 3) o.data[i] = 110 + o.data[i] * 0.25;
+        }
+        return o;
+      },
+
+      'Тёмное': d => {
+        const o = clone(d);
+        for (let i = 0; i < o.data.length; i++) {
+          if (i % 4 < 3) o.data[i] = Math.pow(o.data[i] / 255, 3) * 120;
+        }
+        return o;
+      },
+
+      'Засвеченное': d => {
+        const o = clone(d);
+        for (let i = 0; i < o.data.length; i++) {
+          if (i % 4 < 3) o.data[i] = 255 - Math.pow(1 - o.data[i] / 255, 3) * 120;
+        }
+        return o;
+      }
+    };
+
+    // PSNR между двумя изображениями, дБ
+    function psnr(a, b) {
+      let sum = 0, n = 0;
+      for (let i = 0; i < a.data.length; i++) {
+        if (i % 4 < 3) {
+          const e = a.data[i] - b.data[i];
+          sum += e * e;
+          n++;
+        }
+      }
+      const mse = sum / n;
+      return mse ? (10 * Math.log10(65025 / mse)).toFixed(2) : '∞';
+    }
+
+    // ---------- Нелинейные фильтры ----------
+
+    // Фильтр по порядковым статистикам.
+    // type: med | min | max | mid | rank | alpha
+    // w — размер окна, p — параметр в процентах
+    function orderFilter(d, type, w, p) {
+      const W = d.width, H = d.height;
+      const o = clone(d);
+      const r = w >> 1;
+      const N = w * w;
+      const win = new Uint8Array(N);
+
+      const rankIdx = Math.min(N - 1, Math.round(p / 100 * (N - 1)));   // для рангового
+      const trim = Math.min(Math.floor(N * p / 100), (N - 1) >> 1);     // для α-усечённого
+
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          for (let k = 0; k < 3; k++) {
+
+            // собираем окно (границы — повтором краевых пикселей)
+            let n = 0;
+            for (let j = -r; j <= r; j++) {
+              const yy = Math.min(H - 1, Math.max(0, y + j));
+              for (let i = -r; i <= r; i++) {
+                const xx = Math.min(W - 1, Math.max(0, x + i));
+                win[n++] = d.data[(yy * W + xx) * 4 + k];
+              }
+            }
+
+            win.sort();   // вариационный ряд
+
+            let v;
+            switch (type) {
+              case 'med':
+                v = win[N >> 1];
+                break;
+              case 'min':
+                v = win[0];
+                break;
+              case 'max':
+                v = win[N - 1];
+                break;
+              case 'mid':
+                v = (win[0] + win[N - 1]) / 2;
+                break;
+              case 'rank':
+                v = win[rankIdx];
+                break;
+              case 'alpha': {
+                let s = 0;
+                for (let q = trim; q < N - trim; q++) s += win[q];
+                v = s / (N - 2 * trim);
+                break;
+              }
+            }
+            o.data[(y * W + x) * 4 + k] = v;
+          }
+        }
+      }
+      return o;
+    }
+
+    function runFilter() {
+      if (!src) return;
+
+      const w = +$('fw').value;
+      const p = +$('fp').value;
+      const grid = $('fgrid');
+      grid.innerHTML = '';
+
+      // По��анальная абсолютная разность ×4 (для наглядности)
+      const diff = (a, b) => {
+        const o = clone(a);
+        for (let i = 0; i < o.data.length; i++) {
+          if (i % 4 < 3) o.data[i] = cl(Math.abs(a.data[i] - b.data[i]) * 4);
+        }
+        return o;
+      };
+
+      // Карточка: изображение, под ним разность, под ней подпись
+      const addCell = (title, image, diffImage, info) => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.style.margin = 0;
+        div.innerHTML =
+          `<h3>${title}</h3>` +
+          `<div class="two"><canvas></canvas>
+          <small>Разность с исходным<small/>
+          ${diffImage ? '<canvas></canvas>' : ''}</div>`
+          // + `<small>${info}</small>`
+          ;
+        grid.appendChild(div);
+
+        const cs = div.querySelectorAll('canvas');
+        putImage(cs[0], image);
+        if (diffImage) putImage(cs[1], diffImage);
+      };
+
+      addCell(
+        'Исходное',
+        src,
+        ref ? diff(ref, src) : null,
+        ref ? `PSNR: ${psnr(ref, src)} дБ · справа разность с эталоном ×4` : 'без эталона'
+      );
+
+      const filters = [
+        ['Медианный', 'med'],
+        ['K-Ранговый', 'rank'],
+        ['Минимум', 'min'],
+        ['Максимум', 'max'],
+        ['Полусумма min/max', 'mid']
+      ];
+
+      const t0 = performance.now();
+      filters.forEach(([title, type]) => {
+        const res = orderFilter(src, type, w, p);
+        const info = (ref ? `PSNR: ${psnr(ref, res)} дБ · ` : '') + 'разность с исходным ×4';
+        addCell(title, res, diff(src, res), info);
+      });
+    }
+
+    // ---------- Гистограммы и контраст ----------
+
+    // Гистограмма яркости (Y = 0.299R + 0.587G + 0.114B)
+    function lumHist(d) {
+      const h = new Array(256).fill(0);
+      for (let i = 0; i < d.data.length; i += 4) {
+        h[Math.round(0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2])]++;
+      }
+      return h;
+    }
+
+    // Гистограмма одного канала (k: 0=R, 1=G, 2=B)
+    function chanHist(d, k) {
+      const h = new Array(256).fill(0);
+      for (let i = k; i < d.data.length; i += 4) {
+        h[d.data[i]]++;
+      }
+      return h;
+    }
+
+    // Таблица эквализации по гистограмме h: s = 255*(CDF − CDFmin)/(N − CDFmin)
+    function eqLut(h, total) {
+      const lut = new Uint8Array(256);
+      const first = h.findIndex(v => v > 0);
+      const cdfMin = h[first];
+      let c = 0;
+      for (let i = 0; i < 256; i++) {
+        c += h[i];
+        lut[i] = total === cdfMin ? i : Math.round((c - cdfMin) / (total - cdfMin) * 255);
+      }
+      return lut;
+    }
+
+    // Линейное контрастирование с отсечением clip % пикселей с каждого края
+    function linearStretch(d, clip) {
+      const o = clone(d);
+      const total = d.width * d.height;
+      const cut = total * clip / 100;
+
+      for (let k = 0; k < 3; k++) {
+        const h = chanHist(d, k);
+        let lo = 0, hi = 255, c = 0;
+
+        for (let i = 0; i < 256; i++) {
+          c += h[i];
+          if (c > cut) {lo = i; break;}
+        }
+        c = 0;
+        for (let i = 255; i >= 0; i--) {
+          c += h[i];
+          if (c > cut) {hi = i; break;}
+        }
+        if (hi <= lo) hi = lo + 1;
+
+        for (let i = k; i < o.data.length; i += 4) {
+          o.data[i] = cl((d.data[i] - lo) * 255 / (hi - lo));
+        }
+      }
+      return o;
+    }
+
+    // Эквализация трёх каналов RGB независимо
+    function equalizeRGB(d) {
+      const o = clone(d);
+      const total = d.width * d.height;
+      for (let k = 0; k < 3; k++) {
+        const lut = eqLut(chanHist(d, k), total);
+        for (let i = k; i < o.data.length; i += 4) o.data[i] = lut[d.data[i]];
+      }
+      return o;
+    }
+
+    // Эквализация только компоненты V в HSV (V = max(R,G,B)).
+    // При фиксированных H и S значения RGB линейно зависят от V,
+    // поэтому достаточно умножить пиксель на отношение новой V к старой.
+    function equalizeHSV(d) {
+      const o = clone(d);
+      const total = d.width * d.height;
+      const h = new Array(256).fill(0);
+
+      for (let i = 0; i < d.data.length; i += 4) {
+        h[Math.max(d.data[i], d.data[i + 1], d.data[i + 2])]++;
+      }
+      const lut = eqLut(h, total);
+
+      for (let i = 0; i < d.data.length; i += 4) {
+        const v = Math.max(d.data[i], d.data[i + 1], d.data[i + 2]);
+        if (!v) continue;
+        const f = lut[v] / v;
+        for (let k = 0; k < 3; k++) o.data[i + k] = cl(d.data[i + k] * f);
+      }
+      return o;
+    }
+
+    function drawHist(canvas, h) {
+      canvas.width = 256;
+      canvas.height = 90;
+      const g = canvas.getContext('2d');
+      const max = Math.max(...h);
+      g.fillStyle = getComputedStyle(document.body).color;
+      g.globalAlpha = 0.8;
+      for (let i = 0; i < 256; i++) {
+        const bar = h[i] / max * 88;
+        g.fillRect(i, 90 - bar, 1, bar);
+      }
+      g.globalAlpha = 1;
+    }
+
+    // Среднее, СКО и диапазон яркости
+    function lumStats(d) {
+      const h = lumHist(d);
+      const n = d.width * d.height;
+
+      let mean = 0;
+      h.forEach((v, i) => mean += v * i);
+      mean /= n;
+
+      let sq = 0;
+      h.forEach((v, i) => sq += v * (i - mean) ** 2);
+
+      const lo = h.findIndex(v => v);
+      const hi = 255 - [...h].reverse().findIndex(v => v);
+
+      return `ср. ${mean.toFixed(0)}, σ=${Math.sqrt(sq / n).toFixed(1)}, диапазон ${lo}–${hi}`;
+    }
+
+    function runContrast() {
+      if (!src) return;
+
+      const clip = +$('clip').value;
+      const items = [
+        ['Исходное', src],
+        ['Линейное контрастирование', linearStretch(src, clip)],
+        ['Эквализация RGB (3 канала)', equalizeRGB(src)],
+        ['Эквализация V в HSV', equalizeHSV(src)]
+      ];
+
+      const grid = $('cgrid');
+      grid.innerHTML = '';
+
+      items.forEach(([title, d], idx) => {
+        // разность с исходным изображением (без усиления) и средняя абсолютная разность
+        const df = clone(d);
+        let sum = 0;
+        for (let i = 0; i < df.data.length; i++) {
+          if (i % 4 < 3) {
+            const e = Math.abs(d.data[i] - src.data[i]);
+            sum += e;
+            df.data[i] = e;
+          }
+        }
+        const meanDiff = (sum / (d.width * d.height * 3)).toFixed(1);
+
+        const div = document.createElement('div');
+        div.innerHTML =
+          `<h3>${title}</h3>` +
+          `<canvas></canvas>` +
+          `<small>${idx ? 'Разность с исходным (без усиления)' : 'Сравнение с исходным'}</small>` +
+          `<canvas${idx ? '' : ' style="visibility:hidden"'}></canvas>` +
+          `<canvas class="h"></canvas>`
+          // + `<small>${lumStats(d)}${idx ? ', Δ ср. = ' + meanDiff : ''}</small>`
+          ;
+        grid.appendChild(div);
+
+        const cs = div.querySelectorAll('canvas');
+        putImage(cs[0], d);
+        putImage(cs[1], df);
+        drawHist(cs[2], lumHist(d));
+      });
+    }
+
+    // ---------- Интерфейс ----------
+
+    let imageData = null
+    function setSource(d, reference) {
+      src = d;
+      ref = reference;
+      runFilter();
+      runContrast();
+    }
+
+    let base = baseImage();
+
+    // Кнопки тестовой базы
+    let applyCurrentVariant = function () { };
+    Object.keys(variants).forEach(name => {
+      const b = document.createElement('button');
+      b.textContent = name;
+      b.onclick = () => {
+        applyCurrentVariant = function () {
+          currentVariant = b;
+          seed = 7;
+          [...$('tests').children].forEach(x => x.classList.remove('on'));
+          b.classList.add('on');
+          setSource(variants[name](base), base);
+        }
+        applyCurrentVariant()
+      };
+      $('tests').appendChild(b);
+    });
+
+    // Загрузка собственного изображения (масштабируется до 320 px по большей стороне)
+    $('file').onchange = e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 320 / Math.max(img.width, img.height));
+        const c = makeCanvas(Math.round(img.width * k), Math.round(img.height * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        [...$('tests').children].forEach(x => x.classList.remove('on'));
+        base = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+        applyCurrentVariant()
+      };
+      img.src = URL.createObjectURL(f);
+    };
+
+    // Автоматический пересчёт фильтров: после отпускания ползунка и смены окна
+    $('fp').oninput = e => $('fpv').textContent = e.target.value;
+    $('fp').onchange = runFilter;
+    $('fw').onchange = runFilter;
+
+    // Линейное контрастирование пересчитывается при движении ползунка
+    $('clip').oninput = e => {
+      $('clipv').textContent = e.target.value;
+      runContrast();
+    };
+
+    // Вкладки
+    $('t1').onclick = () => {
+      $('p1').hidden = false;
+      $('p2').hidden = true;
+      $('t1').className = 'on';
+      $('t2').className = '';
+    };
+    $('t2').onclick = () => {
+      $('p1').hidden = true;
+      $('p2').hidden = false;
+      $('t2').className = 'on';
+      $('t1').className = '';
+      runContrast();
+    };
+
+    // Стартовое изображение — «Соль и перец»
+    $('tests').children[1].click();
+  </script>
+</body>
+
+</html>
+
+<!--
+vim:spelllang=en,ru
+-->
