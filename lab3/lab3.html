@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <title>Лаб. 3. Растровые алгоритмы</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <style>
+    :root {
+      color-scheme: dark;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      --bg: #1c1c1e;
+      --card: #2c2c2e;
+      --border: #48484a;
+      --text: #f5f5f7;
+      --muted: #98989d;
+      --accent: #0a84ff;
+      --red: #ff453a
+    }
+
+    html {
+      scroll-padding-top: env(safe-area-inset-top, 0px)
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px
+    }
+
+    h1 {
+      font-size: 22px;
+      margin: 0 0 4px
+    }
+
+    h2 {
+      font-size: 17px;
+      margin: 20px 0 8px
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin: 10px 0
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: end
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      font-size: 12px;
+      color: var(--muted)
+    }
+
+    select,
+    button,
+    input[type=number] {
+      font: inherit;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text)
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      border: 0
+    }
+
+    button.ghost {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border)
+    }
+
+    input[type=number] {
+      width: 72px
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 480px;
+      touch-action: none;
+      cursor: grab;
+      border: 1px solid var(--border);
+      border-radius: 8px
+    }
+
+    .scroll {
+      overflow: auto;
+      max-height: 340px
+    }
+
+    table {
+      border-collapse: collapse;
+      font-size: 13px;
+      width: 100%
+    }
+
+    th,
+    td {
+      border: 1px solid var(--border);
+      padding: 3px 8px;
+      text-align: right;
+      white-space: nowrap
+    }
+
+    th {
+      background: var(--card);
+      position: sticky;
+      top: 0
+    }
+
+    td:first-child {
+      text-align: left
+    }
+
+    code {
+      background: var(--bg);
+      padding: 1px 4px;
+      border-radius: 4px
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+
+    <h1>Лаб. 3. Базовые растровые алгоритмы</h1>
+    <div class="muted">ЛР 3: пошаговый алгоритм, ЦДА, Брезенхем (отрезок и окружность) + сглаживание Ву</div>
+
+    <div class="card">
+      <div class="row">
+        <label>Алгоритм
+          <select id="alg">
+            <option value="step">Пошаговый</option>
+            <option value="dda">ЦДА</option>
+            <option value="bres" selected>Брезенхем (отрезок)</option>
+            <option value="circ">Брезенхем (окружность)</option>
+            <option value="wu">Ву (сглаживание)</option>
+          </select></label>
+        <label>A x<input type="number" id="ax"></label>
+        <label>A y<input type="number" id="ay"></label>
+        <label>B x<input type="number" id="bx"></label>
+        <label>B y<input type="number" id="by"></label>
+        <label style="flex:1;min-width:180px">Масштаб<input type="range" id="zoom" min="6" max="80" value="28"></label>
+        <button class="ghost" id="fit">Сбросить вид</button>
+        <span id="coords" class="muted"></span>
+      </div>
+    </div>
+
+    <canvas id="cv"></canvas>
+    <div id="hover" class="muted"></div>
+
+    <h2>Пошаговые вычисления</h2>
+    <div id="desc" class="muted"></div>
+    <div class="card scroll">
+      <table id="trace"></table>
+    </div>
+
+    <h2>Отчёт: время работы</h2>
+    <div class="row"><button id="bench">Измерить время</button>
+      <span class="muted">Среднее время одного вызова без отрисовки через performance.now().</span>
+    </div>
+    <div class="card scroll">
+      <table id="benchTable"></table>
+    </div>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const canvas = $('cv'), ctx = canvas.getContext('2d');
+    const COLORS = {grid: '#3a3a3c', axis: '#c7c7cc', pixel: '#0a84ff', ideal: '#ff453a', text: '#fff'};
+    const round = Math.round;
+
+    let A = [-8, -3], B = [9, 7];
+    let scale = 28;
+    let originX = 0, originY = 0;
+    let width, height, dpr = 1;
+    let result = {pts: [], aa: false};
+
+    const toScreenX = x => originX + x * scale;
+    const toScreenY = y => originY - y * scale;
+    const radius = () => Math.max(1, round(Math.hypot(B[0] - A[0], B[1] - A[1])));
+
+    function stepwise([x1, y1], [x2, y2], trace = true) {
+      const pts = [], rows = [];
+      const dx = x2 - x1, dy = y2 - y1;
+      const alongX = Math.abs(dx) >= Math.abs(dy);
+      const [a1, b1, a2, da, db] = alongX ? [x1, y1, x2, dx, dy] : [y1, x1, y2, dy, dx];
+      if (da === 0) return {pts: [[x1, y1, 1]], head: ['x', 'y'], rows: [[x1, y1]]};
+      const k = db / da, b = b1 - k * a1, dir = da > 0 ? 1 : -1;
+      for (let a = a1; a !== a2 + dir; a += dir) {
+        const v = k * a + b, vr = round(v);
+        pts.push(alongX ? [a, vr, 1] : [vr, a, 1]);
+        if (trace) rows.push([a, v.toFixed(3), vr]);
+      }
+      const [n1, n2] = alongX ? ['x', 'y'] : ['y', 'x'];
+      return {pts, rows, head: [n1, `${n2} = k·${n1} + b (k = ${k.toFixed(3)})`, `round(${n2})`]};
+    }
+
+    function dda([x1, y1], [x2, y2], trace = true) {
+      const dx = x2 - x1, dy = y2 - y1;
+      const L = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+      const stepX = dx / L, stepY = dy / L;
+      const pts = [], rows = [];
+      let x = x1, y = y1;
+      for (let i = 0; i <= L; i++) {
+        pts.push([round(x), round(y), 1]);
+        if (trace) rows.push([i, x.toFixed(3), y.toFixed(3), round(x), round(y)]);
+        x += stepX; y += stepY;
+      }
+      return {
+        pts, rows, head: ['i', 'x', 'y', 'round(x)', 'round(y)'],
+        info: `L = max(|dx|, |dy|) = ${L}; Δx = ${stepX.toFixed(3)}, Δy = ${stepY.toFixed(3)}`
+      };
+    }
+
+    function bresenhamLine([x1, y1], [x2, y2], trace = true) {
+      const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+      const sx = x1 < x2 ? 1 : -1, sy = y1 < y2 ? 1 : -1;
+      const pts = [], rows = [];
+      let x = x1, y = y1, err = dx - dy, i = 0;
+      while (true) {
+        pts.push([x, y, 1]);
+        if (trace) rows.push([i++, x, y, err]);
+        if (x === x2 && y === y2) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) {err -= dy; x += sx;}
+        if (e2 < dx) {err += dx; y += sy;}
+      }
+      return {
+        pts, rows, head: ['i', 'x', 'y', 'ошибка e'],
+        info: `dx = ${dx}, dy = ${dy}, e₀ = dx − dy = ${dx - dy}. Если 2e > −dy — шаг по x (e −= dy); если 2e < dx — шаг по y (e += dx).`
+      };
+    }
+
+    function bresenhamCircle([cx, cy], R, trace = true) {
+      const pts = [], rows = [];
+      let x = 0, y = R, d = 3 - 2 * R;
+      while (x <= y) {
+
+        for (const [px, py] of [[x, y], [y, x], [-x, y], [-y, x], [x, -y], [y, -x], [-x, -y], [-y, -x]])
+          pts.push([cx + px, cy + py, 1]);
+        if (trace) rows.push([x, y, d, `(±${x}, ±${y}), (±${y}, ±${x})`]);
+        if (d < 0) d += 4 * x + 6;
+        else {d += 4 * (x - y) + 10; y--;}
+        x++;
+      }
+      return {
+        pts, rows, head: ['x', 'y', 'd', 'симметричные точки (от центра)'],
+        info: `x = 0, y = R = ${R}, d₀ = 3 − 2R = ${3 - 2 * R}. Если d < 0: d += 4x + 6, иначе d += 4(x − y) + 10 и y−−. Считается октант 0…45°, остальные — симметрией.`
+      };
+    }
+
+    function wuLine([x1, y1], [x2, y2]) {
+      const steep = Math.abs(y2 - y1) > Math.abs(x2 - x1);
+      if (steep) {[x1, y1] = [y1, x1];[x2, y2] = [y2, x2];}
+      if (x1 > x2) {[x1, x2] = [x2, x1];[y1, y2] = [y2, y1];}
+      const k = x2 === x1 ? 0 : (y2 - y1) / (x2 - x1);
+      const pts = [];
+      const add = (u, v, a) => pts.push(steep ? [v, u, a] : [u, v, a]);
+      for (let x = x1; x <= x2; x++) {
+        const y = y1 + k * (x - x1), lower = Math.floor(y), frac = y - lower;
+        add(x, lower, 1 - frac);
+        if (frac > 1e-9) add(x, lower + 1, frac);
+      }
+      return pts;
+    }
+
+    function wuAlgorithm(p1, p2, trace = true) {
+      const pts = wuLine(p1, p2);
+      const rows = trace ? pts.map(([x, y, a]) => [x, y, a.toFixed(3)]) : [];
+      return {pts, rows, head: ['x', 'y', 'яркость (α пикселя)']};
+    }
+
+    const ALGORITHMS = {
+      step: {name: 'Пошаговый', run: t => stepwise(A, B, t)},
+      dda: {name: 'ЦДА', run: t => dda(A, B, t)},
+      bres: {name: 'Брезенхем (отрезок)', run: t => bresenhamLine(A, B, t)},
+      circ: {name: 'Брезенхем (окружность)', run: t => bresenhamCircle(A, radius(), t)},
+      wu: {name: 'Ву (сглаживание)', run: t => wuAlgorithm(A, B, t)},
+    };
+
+    function draw() {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const xMin = Math.floor(-originX / scale) - 1, xMax = Math.ceil((width - originX) / scale) + 1;
+      const yMin = Math.floor((originY - height) / scale) - 1, yMax = Math.ceil(originY / scale) + 1;
+
+      ctx.fillStyle = COLORS.pixel;
+      for (const [x, y, alpha] of result.pts) {
+        ctx.globalAlpha = result.aa ? alpha : 1;
+        ctx.fillRect(toScreenX(x - 0.5), toScreenY(y + 0.5), scale, scale);
+      }
+      ctx.globalAlpha = 1;
+
+      ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 1; ctx.beginPath();
+      for (let i = xMin; i <= xMax; i++) {ctx.moveTo(toScreenX(i - 0.5), 0); ctx.lineTo(toScreenX(i - 0.5), height);}
+      for (let j = yMin; j <= yMax; j++) {ctx.moveTo(0, toScreenY(j - 0.5)); ctx.lineTo(width, toScreenY(j - 0.5));}
+      ctx.stroke();
+
+      ctx.strokeStyle = COLORS.axis; ctx.lineWidth = 1.5; ctx.beginPath();
+      ctx.moveTo(0, toScreenY(0)); ctx.lineTo(width, toScreenY(0));
+      ctx.moveTo(toScreenX(0), 0); ctx.lineTo(toScreenX(0), height);
+      ctx.stroke();
+
+      const every = Math.max(1, Math.ceil(26 / scale));
+      ctx.fillStyle = COLORS.axis; ctx.font = '11px system-ui';
+      ctx.textAlign = 'center';
+      for (let i = xMin; i <= xMax; i++)
+        if (i && i % every === 0) ctx.fillText(i, toScreenX(i), clamp(toScreenY(0) + 14, 12, height - 4));
+      ctx.textAlign = 'right';
+      for (let j = yMin; j <= yMax; j++)
+        if (j && j % every === 0) ctx.fillText(j, clamp(toScreenX(0) - 5, 26, width - 4), toScreenY(j) + 4);
+      ctx.fillText('0', toScreenX(0) - 5, toScreenY(0) + 13);
+      ctx.textAlign = 'left';
+      ctx.fillText('x →', width - 26, toScreenY(0) - 6);
+      ctx.fillText('y ↑', toScreenX(0) + 6, 12);
+
+      ctx.strokeStyle = COLORS.ideal; ctx.lineWidth = 1.5; ctx.beginPath();
+      if ($('alg').value === 'circ') ctx.arc(toScreenX(A[0]), toScreenY(A[1]), radius() * scale, 0, 2 * Math.PI);
+      else {ctx.moveTo(toScreenX(A[0]), toScreenY(A[1])); ctx.lineTo(toScreenX(B[0]), toScreenY(B[1]));}
+      ctx.stroke();
+
+      ['A', 'B'].forEach((label, i) => {
+        const [px, py] = [toScreenX([A, B][i][0]), toScreenY([A, B][i][1])];
+        ctx.beginPath(); ctx.arc(px, py, 8, 0, 2 * Math.PI);
+        ctx.fillStyle = COLORS.ideal; ctx.fill();
+        ctx.strokeStyle = '#1c1c1e'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = COLORS.text; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText(label, px, py + 3.5);
+      });
+    }
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+    function recompute({refit = false} = {}) {
+      const key = $('alg').value;
+      const out = ALGORITHMS[key].run(true);
+      const smooth = key === 'wu';
+      result = {pts: out.pts, aa: smooth};
+
+      $('coords').textContent = key === 'circ' ? `Окружность: центр A, радиус R = ${radius()} (до точки B)` : '';
+      ['ax', 'ay', 'bx', 'by'].forEach((id, i) => $(id).value = [A[0], A[1], B[0], B[1]][i]);
+      $('desc').innerHTML = `<b>${ALGORITHMS[key].name}</b>. Пикселей: ${result.pts.length}. ${out.info || ''}` +
+        (smooth ? '<br>Ву: для каждого шага по главной оси яркость делится между двумя пикселями: 1 − α и α, где α — дробная часть y.' : '');
+      $('trace').innerHTML = '<tr>' + out.head.map(h => `<th>${h}</th>`).join('') + '</tr>' +
+        out.rows.map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
+
+      if (refit) fitView();
+      draw();
+    }
+
+    function fitView() {
+      const R = radius();
+      const [xs, ys] = $('alg').value === 'circ'
+        ? [[A[0] - R, A[0] + R], [A[1] - R, A[1] + R]] : [[A[0], B[0]], [A[1], B[1]]];
+      const w = Math.abs(xs[0] - xs[1]) + 6, h = Math.abs(ys[0] - ys[1]) + 6;
+      scale = clamp(Math.floor(Math.min(width / w, height / h)), 6, 80);
+      $('zoom').value = scale;
+      originX = width / 2 - (xs[0] + xs[1]) / 2 * scale;
+      originY = height / 2 + (ys[0] + ys[1]) / 2 * scale;
+    }
+
+    function resizeCanvas() {
+      dpr = devicePixelRatio || 1;
+      const box = canvas.getBoundingClientRect();
+      width = box.width; height = box.height;
+      canvas.width = width * dpr; canvas.height = height * dpr;
+      draw();
+    }
+
+    function runBenchmark() {
+      const sizes = [50, 200, 1000];
+      const cases = [
+        ['Пошаговый', n => stepwise([0, 0], [n, round(n * 0.6)], false)],
+        ['ЦДА', n => dda([0, 0], [n, round(n * 0.6)], false)],
+        ['Брезенхем (отрезок)', n => bresenhamLine([0, 0], [n, round(n * 0.6)], false)],
+        ['Брезенхем (окружность)', n => bresenhamCircle([0, 0], n, false)],
+        ['Ву (сглаживание)', n => wuLine([0, 0], [n, round(n * 0.6)])],
+      ];
+      let html = '<tr><th>Алгоритм</th>' + sizes.map(n => `<th>размер ${n}, мкс</th>`).join('') + '</tr>';
+      for (const [name, fn] of cases) {
+        html += `<tr><td>${name}</td>`;
+        for (const n of sizes) {
+          const reps = Math.max(20, Math.floor(200000 / n));
+          fn(n);
+          const t0 = performance.now();
+          for (let i = 0; i < reps; i++) fn(n);
+          html += `<td>${((performance.now() - t0) / reps * 1000).toFixed(2)}</td>`;
+        }
+        html += '</tr>';
+      }
+      $('benchTable').innerHTML = html +
+        '<tr><td colspan="4" class="muted">Размер — проекция отрезка (0,0)–(n; 0,6n) на ось x или радиус окружности.</td></tr>';
+    }
+
+    let draggedPoint = -1, panStart = null;
+    const gridPos = e => {
+      const box = canvas.getBoundingClientRect();
+      const sx = e.clientX - box.left, sy = e.clientY - box.top;
+      return {sx, sy, x: round((sx - originX) / scale), y: round((originY - sy) / scale)};
+    };
+
+    canvas.onpointerdown = e => {
+      const {sx, sy} = gridPos(e);
+      draggedPoint = [A, B].findIndex(p => Math.hypot(toScreenX(p[0]) - sx, toScreenY(p[1]) - sy) < 16);
+      if (draggedPoint < 0) panStart = {x: e.clientX, y: e.clientY, ox: originX, oy: originY};
+      canvas.setPointerCapture(e.pointerId);
+    };
+    canvas.onpointermove = e => {
+      const p = gridPos(e);
+      if (draggedPoint >= 0) {
+        (draggedPoint === 0 ? A : B).splice(0, 2, p.x, p.y);
+        recompute();
+      } else if (panStart) {
+        originX = panStart.ox + e.clientX - panStart.x;
+        originY = panStart.oy + e.clientY - panStart.y;
+        draw();
+      }
+      $('hover').textContent = `Пиксель под курсором: (${p.x}, ${p.y})`;
+    };
+    canvas.onpointerup = () => {draggedPoint = -1; panStart = null;};
+
+    function zoomAt(sx, sy, newScale) {
+      const wx = (sx - originX) / scale, wy = (originY - sy) / scale;
+      scale = clamp(newScale, 6, 80);
+      originX = sx - wx * scale; originY = sy + wy * scale;
+      $('zoom').value = scale; draw();
+    }
+    canvas.onwheel = e => {
+      e.preventDefault();
+      const {sx, sy} = gridPos(e);
+      zoomAt(sx, sy, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+    };
+    $('zoom').oninput = e => zoomAt(width / 2, height / 2, +e.target.value);
+    $('alg').onchange = () => recompute();
+    for (const id of ['ax', 'ay', 'bx', 'by']) {
+      $(id).onchange = () => {
+        const v = id => round(+$(id).value) || 0;
+        A = [v('ax'), v('ay')]; B = [v('bx'), v('by')];
+        recompute({refit: true});
+      };
+    }
+    $('fit').onclick = () => {fitView(); draw();};
+    $('bench').onclick = runBenchmark;
+    addEventListener('resize', resizeCanvas);
+
+    resizeCanvas();
+    recompute({refit: true});
+  </script>
+</body>
+
+</html>
