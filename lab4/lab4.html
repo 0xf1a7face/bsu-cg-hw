@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Лаб. 4. Алгоритмы отсечения</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1c1c1e;
+      --panel: #2c2c2e;
+      --line: #48484a;
+      --text: #f5f5f7;
+      --muted: #98989d;
+      --grid: #2a2a2c;
+      --axis: #6e6e73;
+      --window: #0a84ff;
+      --source: #ff453a;
+      --visible: #30d158;
+      box-sizing: border-box;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+    }
+
+    aside {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    h1 {
+      font-size: 22px;
+      margin: 0;
+      font-weight: 650;
+    }
+
+    h2 {
+      font-size: 13px;
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .modes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    button,
+    .file {
+      background: #3a3a3c;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    button:hover,
+    .file:hover {
+      border-color: var(--muted);
+    }
+
+    button:focus-visible,
+    .file:focus-within,
+    textarea:focus-visible {
+      outline: 2px solid var(--window);
+      outline-offset: 1px;
+    }
+
+    button.active {
+      background: var(--window);
+      color: #fff;
+      border-color: var(--window);
+      font-weight: 600;
+    }
+
+    button.run {
+      background: var(--visible);
+      color: #07210d;
+      border-color: var(--visible);
+      font-weight: 650;
+    }
+
+    .row {
+      display: flex;
+      gap: 6px;
+    }
+
+    .row>* {
+      flex: 1;
+    }
+
+    .file input {
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
+    }
+
+    .file {
+      position: relative;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 210px;
+      resize: vertical;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      font: 13px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0;
+      white-space: pre-line;
+    }
+
+    .error {
+      color: var(--source);
+      font-size: 14px;
+      min-height: 1.4em;
+      margin: 0;
+    }
+
+    .legend {
+      display: grid;
+      gap: 4px;
+      font-size: 14px;
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 22px;
+      height: 0;
+      border-top: 3px solid;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    .legend .w::before {
+      border-color: var(--window);
+    }
+
+    .legend .s::before {
+      border-color: var(--source);
+      border-top-style: dashed;
+    }
+
+    .legend .v::before {
+      border-color: var(--visible);
+      border-top-width: 5px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    td.ok {
+      color: var(--visible);
+    }
+
+    td.no {
+      color: var(--source);
+    }
+
+    main {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    @media (max-width: 800px) {
+      body {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 60vh;
+        height: auto;
+      }
+
+      aside {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <aside>
+    <h1>Лаб. 4. Отсечение отрезков</h1>
+
+    <div>
+      <h2>Алгоритм</h2>
+      <div class="modes">
+        <button id="mode-lb" class="active">Лианг-Барски</button>
+        <button id="mode-cb">Кирус-Бек</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Входные данные</h2>
+      <textarea id="input" spellcheck="false"></textarea>
+      <p class="hint" id="format"></p>
+    </div>
+
+    <div class="row">
+      <label class="file">Загрузить файл<input type="file" id="file" accept=".txt,text/plain"></label>
+      <button id="run" class="run">Отсечь</button>
+    </div>
+    <p class="error" id="error" role="alert"></p>
+
+    <div class="legend">
+      <span class="w">Отсекающее окно</span>
+      <span class="s">Исходные отрезки</span>
+      <span class="v">Видимые части</span>
+    </div>
+
+    <div>
+      <h2>Результат</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>№</th>
+            <th>t₀</th>
+            <th>t₁</th>
+            <th>Видимая часть</th>
+          </tr>
+        </thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </aside>
+
+  <main><canvas id="canvas"></canvas></main>
+
+  <script>
+    "use strict";
+
+    /* ---------- Примеры входных данных ---------- */
+
+    const SAMPLES = {
+      lb: `6
+-4 1 12 9
+2 -3 2 12
+-3 8 5 14
+9 -2 14 4
+3 3 7 6
+-5 -2 -1 -5
+1 1 10 8`,
+      cb: `5
+-4 2 12 8
+0 -3 10 11
+-3 9 11 -1
+2 4 6 5
+-5 -4 -1 -6
+5
+2 1
+9 2
+11 7
+6 10
+1 6`,
+    };
+
+    const FORMATS = {
+      lb: "n — число отрезков\nX1 Y1 X2 Y2 — по одной строке на отрезок\nXmin Ymin Xmax Ymax — прямоугольное окно",
+      cb: "n — число отрезков\nX1 Y1 X2 Y2 — по одной строке на отрезок\nm — число вершин выпуклого окна\nX Y — вершины окна по порядку обхода",
+    };
+
+    /* ---------- Разбор входного файла ---------- */
+
+    function parseInput(text, mode) {
+      const numbers = text.split(/\s+/).filter(Boolean).map(Number);
+      if (numbers.some(Number.isNaN)) throw new Error("Во входных данных есть не число.");
+
+      let pos = 0;
+      const next = () => {
+        if (pos >= numbers.length) throw new Error("Данных меньше, чем указано в заголовках.");
+        return numbers[pos++];
+      };
+
+      const n = next();
+      if (!Number.isInteger(n) || n < 0) throw new Error("Число отрезков должно быть целым неотрицательным.");
+
+      const segments = [];
+      for (let i = 0; i < n; i++) {
+        const a = {x: next(), y: next()};
+        const b = {x: next(), y: next()};
+        segments.push({a, b});
+      }
+
+      if (mode === "lb") {
+        const [xa, ya, xb, yb] = [next(), next(), next(), next()];
+        const window = {xmin: Math.min(xa, xb), ymin: Math.min(ya, yb), xmax: Math.max(xa, xb), ymax: Math.max(ya, yb)};
+        if (window.xmin === window.xmax || window.ymin === window.ymax) {
+          throw new Error("Окно вырождено: его ширина или высота равна нулю.");
+        }
+        return {segments, window};
+      }
+
+      const m = next();
+      if (!Number.isInteger(m) || m < 3) throw new Error("В многоугольнике должно быть не меньше трёх вершин.");
+      const polygon = [];
+      for (let i = 0; i < m; i++) polygon.push({x: next(), y: next()});
+      return {segments, polygon: toCounterClockwise(checkConvex(polygon))};
+    }
+
+    /* ---------- Геометрия многоугольника ---------- */
+
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+    /** Проверяет выпуклость: все повороты на смежных рёбрах — в одну сторону. */
+    function checkConvex(polygon) {
+      let sign = 0;
+      const m = polygon.length;
+      for (let i = 0; i < m; i++) {
+        const c = cross(polygon[i], polygon[(i + 1) % m], polygon[(i + 2) % m]);
+        if (c === 0) continue;
+        if (sign === 0) sign = Math.sign(c);
+        else if (Math.sign(c) !== sign) throw new Error("Окно не выпуклое: алгоритм Кируса-Бека требует выпуклый многоугольник.");
+      }
+      if (sign === 0) throw new Error("Вершины окна лежат на одной прямой.");
+      return polygon;
+    }
+
+    /** Приводит обход к направлению против часовой стрелки (внутренняя нормаль — слева от ребра). */
+    function toCounterClockwise(polygon) {
+      let area2 = 0;
+      polygon.forEach((p, i) => {
+        const q = polygon[(i + 1) % polygon.length];
+        area2 += p.x * q.y - q.x * p.y;
+      });
+      return area2 < 0 ? [...polygon].reverse() : polygon;
+    }
+
+    /* ---------- Алгоритм Лианга-Барски ---------- */
+
+    /**
+     * Отрезок P(t) = P1 + t·(P2 − P1), t ∈ [0, 1].
+     * Для каждой границы окна: p_k·t ≤ q_k.
+     */
+    function liangBarsky({a, b}, w) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const p = [-dx, dx, -dy, dy];
+      const q = [a.x - w.xmin, w.xmax - a.x, a.y - w.ymin, w.ymax - a.y];
+
+      let t0 = 0, t1 = 1;
+      for (let k = 0; k < 4; k++) {
+        if (p[k] === 0) {
+          if (q[k] < 0) return null;       // параллелен границе и лежит снаружи
+          continue;
+        }
+        const r = q[k] / p[k];
+        if (p[k] < 0) t0 = Math.max(t0, r); // входит в окно
+        else t1 = Math.min(t1, r); // выходит из окна
+        if (t0 > t1) return null;
+      }
+      return buildResult(a, dx, dy, t0, t1);
+    }
+
+    /* ---------- Алгоритм Кируса-Бека (выпуклое окно) ---------- */
+
+    /** polygon должен быть выпуклым и обходиться против часовой стрелки. */
+    function cyrusBeck({a, b}, polygon) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+
+      let t0 = 0, t1 = 1;
+      for (let i = 0; i < polygon.length; i++) {
+        const e1 = polygon[i];
+        const e2 = polygon[(i + 1) % polygon.length];
+        const nx = -(e2.y - e1.y);          // внутренняя нормаль ребра
+        const ny = e2.x - e1.x;
+
+        const numerator = nx * (a.x - e1.x) + ny * (a.y - e1.y);
+        const denominator = nx * dx + ny * dy;
+
+        if (denominator === 0) {
+          if (numerator < 0) return null;   // параллелен ребру и снаружи
+          continue;
+        }
+        const t = -numerator / denominator;
+        if (denominator > 0) t0 = Math.max(t0, t); // входит
+        else t1 = Math.min(t1, t); // выходит
+        if (t0 > t1) return null;
+      }
+      return buildResult(a, dx, dy, t0, t1);
+    }
+
+    function buildResult(a, dx, dy, t0, t1) {
+      return {
+        t0, t1,
+        from: {x: a.x + t0 * dx, y: a.y + t0 * dy},
+        to: {x: a.x + t1 * dx, y: a.y + t1 * dy},
+      };
+    }
+
+    /* ---------- Состояние ---------- */
+
+    const state = {mode: "lb", scene: null, results: []};
+
+    const $ = (id) => document.getElementById(id);
+    const canvas = $("canvas");
+    const ctx = canvas.getContext("2d");
+
+    function run() {
+      $("error").textContent = "";
+      try {
+        const scene = parseInput($("input").value, state.mode);
+        state.scene = scene;
+        state.results = scene.segments.map((s) =>
+          state.mode === "lb" ? liangBarsky(s, scene.window) : cyrusBeck(s, scene.polygon)
+        );
+      } catch (err) {
+        state.scene = null;
+        state.results = [];
+        $("error").textContent = err.message;
+      }
+      renderTable();
+      draw();
+    }
+
+    function setMode(mode) {
+      state.mode = mode;
+      $("mode-lb").classList.toggle("active", mode === "lb");
+      $("mode-cb").classList.toggle("active", mode === "cb");
+      $("input").value = SAMPLES[mode];
+      $("format").textContent = FORMATS[mode];
+      run();
+    }
+
+    /* ---------- Таблица результатов ---------- */
+
+    const fmt = (v) => String(Math.round(v * 100) / 100);
+
+    function renderTable() {
+      const body = $("results");
+      body.innerHTML = "";
+      state.results.forEach((r, i) => {
+        const tr = document.createElement("tr");
+        const cells = r
+          ? [i + 1, fmt(r.t0), fmt(r.t1), `(${fmt(r.from.x)}; ${fmt(r.from.y)}) – (${fmt(r.to.x)}; ${fmt(r.to.y)})`]
+          : [i + 1, "–", "–", "отброшен"];
+        cells.forEach((text, c) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          if (c === 3) td.className = r ? "ok" : "no";
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    }
+
+    /* ---------- Отрисовка ---------- */
+
+    /** Шаг сетки вида 1, 2 или 5 · 10^k, дающий около 60 px между линиями. */
+    function niceStep(unitsPerPixel) {
+      const raw = unitsPerPixel * 60;
+      const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+      const base = raw / pow;
+      return (base < 1.5 ? 1 : base < 3.5 ? 2 : base < 7.5 ? 5 : 10) * pow;
+    }
+
+    function collectPoints() {
+      const {scene} = state;
+      const points = [{x: 0, y: 0}];
+      scene.segments.forEach((s) => points.push(s.a, s.b));
+      if (scene.window) {
+        const w = scene.window;
+        points.push({x: w.xmin, y: w.ymin}, {x: w.xmax, y: w.ymax});
+      } else {
+        points.push(...scene.polygon);
+      }
+      return points;
+    }
+
+    function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      if (!state.scene) return;
+
+      // Границы сцены и единый масштаб по обеим осям
+      const pts = collectPoints();
+      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const margin = 50;
+      const scale = Math.min(
+        (width - 2 * margin) / (maxX - minX || 1),
+        (height - 2 * margin) / (maxY - minY || 1)
+      );
+      const offX = (width - scale * (maxX - minX)) / 2 - scale * minX;
+      const offY = (height + scale * (maxY - minY)) / 2 + scale * minY;
+      const toScreen = (p) => ({x: offX + p.x * scale, y: offY - p.y * scale});
+
+      drawGrid(width, height, scale, offX, offY);
+
+      // Отсекающее окно
+      ctx.strokeStyle = getVar("--window");
+      ctx.fillStyle = "rgba(10, 132, 255, 0.12)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      const outline = state.scene.window ? rectToPolygon(state.scene.window) : state.scene.polygon;
+      outline.forEach((p, i) => {
+        const s = toScreen(p);
+        i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Исходные отрезки
+      ctx.strokeStyle = getVar("--source");
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 5]);
+      state.scene.segments.forEach(({a, b}) => line(toScreen(a), toScreen(b)));
+
+      // Видимые части
+      ctx.strokeStyle = getVar("--visible");
+      ctx.fillStyle = getVar("--visible");
+      ctx.lineWidth = 4;
+      ctx.setLineDash([]);
+      ctx.lineCap = "round";
+      state.results.forEach((r) => {
+        if (!r) return;
+        const from = toScreen(r.from), to = toScreen(r.to);
+        line(from, to);
+        [from, to].forEach((p) => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+    }
+
+    function rectToPolygon(w) {
+      return [
+        {x: w.xmin, y: w.ymin}, {x: w.xmax, y: w.ymin},
+        {x: w.xmax, y: w.ymax}, {x: w.xmin, y: w.ymax},
+      ];
+    }
+
+    function line(p, q) {
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+      ctx.stroke();
+    }
+
+    function getVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function drawGrid(width, height, scale, offX, offY) {
+      const step = niceStep(1 / scale);
+      const left = -offX / scale, right = (width - offX) / scale;
+      const bottom = (offY - height) / scale, top = offY / scale;
+
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = getVar("--grid");
+      ctx.beginPath();
+      for (let x = Math.ceil(left / step) * step; x <= right; x += step) {
+        const sx = Math.round(offX + x * scale) + 0.5;
+        ctx.moveTo(sx, 0); ctx.lineTo(sx, height);
+      }
+      for (let y = Math.ceil(bottom / step) * step; y <= top; y += step) {
+        const sy = Math.round(offY - y * scale) + 0.5;
+        ctx.moveTo(0, sy); ctx.lineTo(width, sy);
+      }
+      ctx.stroke();
+
+      // Оси координат
+      ctx.strokeStyle = getVar("--axis");
+      ctx.lineWidth = 1.5;
+      line({x: 0, y: offY}, {x: width, y: offY});
+      line({x: offX, y: 0}, {x: offX, y: height});
+
+      // Подписи делений
+      ctx.fillStyle = getVar("--muted");
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const decimals = Math.max(0, -Math.floor(Math.log10(step)));
+      const label = (v) => v.toFixed(decimals);
+      for (let x = Math.ceil(left / step) * step; x <= right; x += step) {
+        if (Math.abs(x) < step / 2) continue;
+        ctx.fillText(label(x), offX + x * scale, Math.min(Math.max(offY + 5, 2), height - 16));
+      }
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      for (let y = Math.ceil(bottom / step) * step; y <= top; y += step) {
+        if (Math.abs(y) < step / 2) continue;
+        ctx.fillText(label(y), Math.min(Math.max(offX + 6, 2), width - 30), offY - y * scale);
+      }
+      ctx.textAlign = "right";
+      ctx.textBaseline = "top";
+      ctx.fillText("0", offX - 5, offY + 5);
+      ctx.fillText("x", width - 8, Math.min(Math.max(offY + 5, 2), height - 16));
+      ctx.textAlign = "left";
+      ctx.fillText("y", Math.min(Math.max(offX + 8, 2), width - 14), 6);
+    }
+
+    /* ---------- События ---------- */
+
+    $("mode-lb").addEventListener("click", () => setMode("lb"));
+    $("mode-cb").addEventListener("click", () => setMode("cb"));
+    $("run").addEventListener("click", run);
+    $("input").addEventListener("input", run);
+    $("file").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      $("input").value = await file.text();
+      run();
+      event.target.value = "";
+    });
+    new ResizeObserver(draw).observe(canvas);
+
+    setMode("lb");
+  </script>
+</body>
+
+</html>
